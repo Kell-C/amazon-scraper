@@ -130,6 +130,100 @@ const getAmazonHeaders = () => {
   };
 };
 
+// Optimized Puppeteer scraper
+async function scrapeWithPuppeteer(keyword) {
+  let page;
+  const browser = await getBrowser();
+
+  try {
+    page = await browser.newPage();
+    
+    // Configure page
+    await page.setUserAgent(getAmazonHeaders()['user-agent']);
+    await page.setViewport({ width: 1920, height: 1080 });
+    await page.setRequestInterception(true);
+    
+    page.on('request', req => {
+      if (['image', 'font', 'stylesheet'].includes(req.resourceType())) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
+    // Navigate to Amazon
+    await page.goto(`https://www.amazon.com/s?k=${encodeURIComponent(keyword)}`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
+    });
+
+    // CAPTCHA handling
+    if (await page.$('#captchacharacters')) {
+      await page.solveRecaptchas();
+      if (await page.$('#captchacharacters')) {
+        throw new Error('CAPTCHA verification required');
+      }
+    }
+
+    // Wait for results
+    await page.waitForSelector('[data-asin]', { timeout: 10000 });
+
+    // Extract product data
+    return await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('[data-asin]'))
+        .map(item => {
+          const getText = (el) => el?.textContent?.trim();
+          const getAttribute = (el, attr) => el?.getAttribute(attr);
+          const asin = item.getAttribute('data-asin');
+          const linkElement = item.querySelector('a[href*="/dp/"], a[href*="/gp/product/"]');
+          
+          return {
+            title: getText(item.querySelector('h2 span')),
+            price: getText(item.querySelector('.a-price span')),
+            rating: getAttribute(item.querySelector('[aria-label*="stars"]'), 'aria-label'),
+            imageUrl: getAttribute(item.querySelector('img.s-image'), 'src'),
+            link: linkElement 
+              ? `https://www.amazon.com${new URL(linkElement.href).pathname}`
+              : `https://www.amazon.com/dp/${asin}`
+          };
+        })
+        .filter(p => p.title && p.price);
+    });
+  } finally {
+    if (page) await page.close();
+  }
+}
+
+// Fallback Axios scraper
+async function scrapeWithAxios(keyword) {
+  try {
+    const { data } = await axios.get(`https://www.amazon.com/s?k=${encodeURIComponent(keyword)}`, {
+      headers: getAmazonHeaders(),
+      timeout: 15000
+    });
+
+    if (data.includes('robot-verification')) {
+      throw new Error('CAPTCHA detected');
+    }
+
+    const dom = new JSDOM(data);
+    return Array.from(dom.window.document.querySelectorAll('[data-asin]'))
+      .map(item => ({
+        title: item.querySelector('h2 span')?.textContent?.trim(),
+        price: item.querySelector('.a-price span')?.textContent?.trim(),
+        rating: item.querySelector('[aria-label*="stars"]')?.getAttribute('aria-label'),
+        imageUrl: item.querySelector('img.s-image')?.src,
+        link: item.querySelector('a[href*="/dp/"]')?.href
+      }))
+      .filter(p => p.title && p.price);
+
+  } catch (error) {
+    throw new Error(error.response?.status === 503 
+      ? 'Amazon is blocking requests' 
+      : error.message);
+  }
+}
+
 // Improved scraping endpoint
 app.get('/api/scrape', async (req, res) => {
   try {
@@ -193,96 +287,6 @@ app.get('/api/scrape', async (req, res) => {
     });
   }
 });
-
-// Optimized Puppeteer scraper
-async function scrapeWithPuppeteer(keyword) {
-  let page;
-  const browser = await getBrowser();
-
-  try {
-    page = await browser.newPage();
-    
-    // Configure page
-    await page.setUserAgent(getAmazonHeaders()['user-agent']);
-    await page.setViewport({ width: 1920, height: 1080 });
-    await page.setRequestInterception(true);
-    
-    page.on('request', req => {
-      if (['image', 'font', 'stylesheet'].includes(req.resourceType())) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-
-    // Navigate to Amazon
-    await page.goto(`https://www.amazon.com/s?k=${encodeURIComponent(keyword)}`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000
-    });
-
-    // CAPTCHA handling
-    if (await page.$('#captchacharacters')) {
-      await page.solveRecaptchas();
-      if (await page.$('#captchacharacters')) {
-        throw new Error('CAPTCHA verification required');
-      }
-    }
-
-    // Wait for results
-    await page.waitForSelector('[data-asin]', { timeout: 10000 });
-
-    // Extract product data
- return await page.evaluate(() => {
-  return Array.from(document.querySelectorAll('[data-asin]'))
-    .map(item => {
-      const getText = (el) => el?.textContent?.trim();
-      const getAttribute = (el, attr) => el?.getAttribute(attr);
-      const asin = item.getAttribute('data-asin');
-      const linkElement = item.querySelector('a[href*="/dp/"], a[href*="/gp/product/"]');
-      
-      return {
-        title: getText(item.querySelector('h2 span')),
-        price: getText(item.querySelector('.a-price span')),
-        rating: getAttribute(item.querySelector('[aria-label*="stars"]'), 'aria-label'),
-        imageUrl: getAttribute(item.querySelector('img.s-image'), 'src'),
-        link: linkElement 
-          ? `https://www.amazon.com${new URL(linkElement.href).pathname}`
-          : `https://www.amazon.com/dp/${asin}`
-      };
-    })
-    .filter(p => p.title && p.price);
-});
-
-// Fallback Axios scraper
-async function scrapeWithAxios(keyword) {
-  try {
-    const { data } = await axios.get(`https://www.amazon.com/s?k=${encodeURIComponent(keyword)}`, {
-      headers: getAmazonHeaders(),
-      timeout: 15000
-    });
-
-    if (data.includes('robot-verification')) {
-      throw new Error('CAPTCHA detected');
-    }
-
-    const dom = new JSDOM(data);
-    return Array.from(dom.window.document.querySelectorAll('[data-asin]'))
-      .map(item => ({
-        title: item.querySelector('h2 span')?.textContent?.trim(),
-        price: item.querySelector('.a-price span')?.textContent?.trim(),
-        rating: item.querySelector('[aria-label*="stars"]')?.getAttribute('aria-label'),
-        imageUrl: item.querySelector('img.s-image')?.src,
-        link: item.querySelector('a[href*="/dp/"]')?.href
-      }))
-      .filter(p => p.title && p.price);
-
-  } catch (error) {
-    throw new Error(error.response?.status === 503 
-      ? 'Amazon is blocking requests' 
-      : error.message);
-  }
-}
 
 // Server startup
 (async () => {
