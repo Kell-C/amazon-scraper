@@ -233,30 +233,26 @@ async function scrapeWithPuppeteer(keyword) {
     await page.waitForSelector('[data-asin]', { timeout: 10000 });
 
     // Extract product data
-    return await page.evaluate(() => {
-      return Array.from(document.querySelectorAll('[data-asin]'))
-        .map(item => {
-          const getText = (el) => el?.textContent?.trim();
-          const getAttribute = (el, attr) => el?.getAttribute(attr);
-          
-          return {
-            title: getText(item.querySelector('h2 span')),
-            price: getText(item.querySelector('.a-price span')),
-            rating: getAttribute(item.querySelector('[aria-label*="stars"]'), 'aria-label'),
-            imageUrl: getAttribute(item.querySelector('img.s-image'), 'src'),
-            link: linkElement 
-      ? `https://www.amazon.com${new URL(linkElement.href).pathname}`
-      : `https://www.amazon.com/dp/${asin}`
-  };
-          });
-        })
-        .filter(p => p.title && p.price);
-    });
-
-  } finally {
-    if (page) await page.close().catch(console.error);
-  }
-}
+ return await page.evaluate(() => {
+  return Array.from(document.querySelectorAll('[data-asin]'))
+    .map(item => {
+      const getText = (el) => el?.textContent?.trim();
+      const getAttribute = (el, attr) => el?.getAttribute(attr);
+      const asin = item.getAttribute('data-asin');
+      const linkElement = item.querySelector('a[href*="/dp/"], a[href*="/gp/product/"]');
+      
+      return {
+        title: getText(item.querySelector('h2 span')),
+        price: getText(item.querySelector('.a-price span')),
+        rating: getAttribute(item.querySelector('[aria-label*="stars"]'), 'aria-label'),
+        imageUrl: getAttribute(item.querySelector('img.s-image'), 'src'),
+        link: linkElement 
+          ? `https://www.amazon.com${new URL(linkElement.href).pathname}`
+          : `https://www.amazon.com/dp/${asin}`
+      };
+    })
+    .filter(p => p.title && p.price);
+});
 
 // Fallback Axios scraper
 async function scrapeWithAxios(keyword) {
