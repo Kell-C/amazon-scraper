@@ -248,7 +248,7 @@ async function scrapeWithPuppeteer(keyword) {
       ? `https://www.amazon.com${new URL(linkElement.href).pathname}`
       : `https://www.amazon.com/dp/${asin}`
   };
-          };
+          });
         })
         .filter(p => p.title && p.price);
     });
