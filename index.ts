@@ -244,7 +244,10 @@ async function scrapeWithPuppeteer(keyword) {
             price: getText(item.querySelector('.a-price span')),
             rating: getAttribute(item.querySelector('[aria-label*="stars"]'), 'aria-label'),
             imageUrl: getAttribute(item.querySelector('img.s-image'), 'src'),
-            link: getAttribute(item.querySelector('a[href*="/dp/"]'), 'href')
+            link: linkElement 
+      ? `https://www.amazon.com${new URL(linkElement.href).pathname}`
+      : `https://www.amazon.com/dp/${asin}`
+  };
           };
         })
         .filter(p => p.title && p.price);
